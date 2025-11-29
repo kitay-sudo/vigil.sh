@@ -1,0 +1,31 @@
+{
+  "language": "ru",
+  "ssh_whitelist": [
+    "YOUR_IP_HERE"
+  ],
+  "service_whitelist": [
+    "127.0.0.1"
+  ],
+  "telegram": {
+    "bot_token": "YOUR_BOT_TOKEN",
+    "chat_id": "YOUR_CHAT_ID"
+  },
+  "thresholds": {
+    "syn_recv_max": 50,
+    "syn_recv_per_ip_min": 15,
+    "failed_ssh_max": 5,
+    "http_connections_per_ip_max": 100,
+    "ssh_connections_per_ip_max": 3
+  },
+  "protection": {
+    "block_ssh_bruteforce": true,
+    "block_unknown_ssh": true,
+    "block_syn_flood": true,
+    "block_excessive_http": false,
+    "notify_excessive_http": true
+  },
+  "check_interval_seconds": 60,
+  "auto_block": true,
+  "log_file": "/var/log/security-monitor.log",
+  "blocked_ips_file": "/var/log/blocked-ips.log"
+}
