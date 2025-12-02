@@ -627,9 +627,24 @@ NOT automatically blocked unless extreme.
 
 ## HTTP API
 
-Vigil.sh предоставляет HTTP API для получения статистики и мониторинга в реальном времени.
+Vigil.sh предоставляет защищённый HTTP API для получения статистики и мониторинга в реальном времени.
+
+### 🔐 Безопасность
+
+**API защищён ключом авторизации:**
+- Требуется header `X-API-Key` с секретным ключом
+- Ключ генерируется автоматически при установке (32 символа)
+- Без валидного ключа возвращается `401 Unauthorized`
+- Все неудачные попытки доступа логируются
 
 ### Настройка API
+
+**При установке:**
+Установщик автоматически генерирует API ключ и показывает его:
+```
+API Key generated: a8f5d9c2b1e4f7a3d6c9e2b5f8a1d4c7
+IMPORTANT: Save this API key!
+```
 
 **В config.json:**
 ```json
@@ -637,20 +652,28 @@ Vigil.sh предоставляет HTTP API для получения стат�
   "api": {
     "enabled": true,
     "host": "0.0.0.0",
-    "port": 8765
+    "port": 8765,
+    "api_key": "a8f5d9c2b1e4f7a3d6c9e2b5f8a1d4c7"
   }
 }
 ```
 
 **Доступ:**
-- Локально: `http://localhost:8765/stats`
-- Удалённо: `http://YOUR_SERVER_IP:8765/stats`
+- Локально: `http://localhost:8765/watchdog/stats`
+- Удалённо: `http://YOUR_SERVER_IP:8765/watchdog/stats`
 - Через домен: настройте nginx proxy (пример ниже)
 
 ### API Endpoints
 
-#### GET /health
+Все endpoints требуют header `X-API-Key`.
+
+#### GET /watchdog/health
 Простой healthcheck для мониторинга.
+
+**Запрос:**
+```bash
+curl -H "X-API-Key: YOUR_API_KEY" http://localhost:8765/watchdog/health
+```
 
 **Ответ:**
 ```json
@@ -662,12 +685,13 @@ Vigil.sh предоставляет HTTP API для получения стат�
 }
 ```
 
-**Использование:**
+**Без ключа:**
 ```bash
-curl http://localhost:8765/health
+curl http://localhost:8765/watchdog/health
+# {"error": "Unauthorized", "message": "Valid X-API-Key header required"}
 ```
 
-#### GET /stats
+#### GET /watchdog/stats
 Статистика блокировок и угроз.
 
 **Ответ:**
@@ -693,10 +717,10 @@ curl http://localhost:8765/health
 
 **Использование:**
 ```bash
-curl http://localhost:8765/stats | jq
+curl -H "X-API-Key: YOUR_API_KEY" http://localhost:8765/watchdog/stats | jq
 ```
 
-#### GET /status
+#### GET /watchdog/status
 Полный статус системы мониторинга.
 
 **Ответ:**
@@ -747,39 +771,47 @@ curl http://localhost:8765/stats | jq
 
 **Использование:**
 ```bash
-curl http://localhost:8765/status | jq
+curl -H "X-API-Key: YOUR_API_KEY" http://localhost:8765/watchdog/status | jq
 ```
 
 ### Интеграция с nginx
 
-Если вы хотите получать доступ через домен (например `monitor.example.com/api/stats`):
+Если вы хотите получать доступ через домен (например `monitor.example.com/watchdog/stats`):
 
 ```nginx
 server {
     listen 80;
     server_name monitor.example.com;
 
-    location /api/ {
-        proxy_pass http://localhost:8765/;
+    location /watchdog/ {
+        proxy_pass http://localhost:8765/watchdog/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-API-Key $http_x_api_key;  # Проброс API ключа
     }
 }
 ```
 
 После настройки доступно:
-- `http://monitor.example.com/api/health`
-- `http://monitor.example.com/api/stats`
-- `http://monitor.example.com/api/status`
+```bash
+curl -H "X-API-Key: YOUR_KEY" http://monitor.example.com/watchdog/health
+curl -H "X-API-Key: YOUR_KEY" http://monitor.example.com/watchdog/stats
+curl -H "X-API-Key: YOUR_KEY" http://monitor.example.com/watchdog/status
+```
 
 ### Примеры использования API
+
+**Сохраните API ключ в переменную:**
+```bash
+export API_KEY="a8f5d9c2b1e4f7a3d6c9e2b5f8a1d4c7"
+```
 
 **Мониторинг uptime (healthcheck):**
 ```bash
 #!/bin/bash
-response=$(curl -s http://localhost:8765/health)
+response=$(curl -s -H "X-API-Key: $API_KEY" http://localhost:8765/watchdog/health)
 status=$(echo $response | jq -r '.status')
 
 if [ "$status" != "ok" ]; then
@@ -790,7 +822,7 @@ fi
 
 **Получение статистики для дашборда:**
 ```bash
-curl -s http://localhost:8765/stats | jq '{
+curl -s -H "X-API-Key: $API_KEY" http://localhost:8765/watchdog/stats | jq '{
   blocked: .blocked_ips_total,
   today: .threats_detected_today,
   top_threat: .threats_by_type | to_entries | max_by(.value) | .key
@@ -799,7 +831,7 @@ curl -s http://localhost:8765/stats | jq '{
 
 **Проверка конфигурации:**
 ```bash
-curl -s http://localhost:8765/status | jq '{
+curl -s -H "X-API-Key: $API_KEY" http://localhost:8765/watchdog/status | jq '{
   server: .server_name,
   ssh_monitoring: .ssh_monitoring.enabled,
   protections: .protection
@@ -808,30 +840,57 @@ curl -s http://localhost:8765/status | jq '{
 
 ### Безопасность API
 
-**Важно:**
-- API по умолчанию доступен на `0.0.0.0` (все интерфейсы)
-- Данные только для чтения (нельзя изменить конфиг через API)
-- Рекомендуется ограничить доступ через файрвол:
+**Встроенная защита:**
+- ✅ **API ключ обязателен** - все запросы требуют `X-API-Key` header
+- ✅ **Read-only** - данные только для чтения, нельзя изменить конфиг
+- ✅ **Логирование** - все неудачные попытки доступа логируются
+- ✅ **32-символьный ключ** - генерируется случайно при установке
 
-```bash
-# Разрешить только с localhost
-iptables -A INPUT -p tcp --dport 8765 ! -s 127.0.0.1 -j DROP
+**Рекомендации:**
 
-# Или разрешить с определённых IP
-iptables -A INPUT -p tcp --dport 8765 -s 94.241.174.106 -j ACCEPT
-iptables -A INPUT -p tcp --dport 8765 -j DROP
-```
+1. **Храните API ключ в безопасности:**
+   ```bash
+   # Плохо: ключ в команде (остаётся в history)
+   curl -H "X-API-Key: secret123" http://...
 
-**Или измените host в конфиге:**
-```json
-{
-  "api": {
-    "enabled": true,
-    "host": "127.0.0.1",  // Только localhost
-    "port": 8765
-  }
-}
-```
+   # Хорошо: ключ в переменной окружения
+   export API_KEY="secret123"
+   curl -H "X-API-Key: $API_KEY" http://...
+   ```
+
+2. **Ограничьте сетевой доступ:**
+   ```bash
+   # Разрешить только localhost
+   iptables -A INPUT -p tcp --dport 8765 ! -s 127.0.0.1 -j DROP
+
+   # Или разрешить определённые IP
+   iptables -A INPUT -p tcp --dport 8765 -s 94.241.174.106 -j ACCEPT
+   iptables -A INPUT -p tcp --dport 8765 -j DROP
+   ```
+
+3. **Или измените host в конфиге (только localhost):**
+   ```json
+   {
+     "api": {
+       "enabled": true,
+       "host": "127.0.0.1",  // Только localhost
+       "port": 8765,
+       "api_key": "your_key_here"
+     }
+   }
+   ```
+
+4. **Регенерация API ключа:**
+   ```bash
+   # Сгенерировать новый ключ
+   openssl rand -hex 16
+
+   # Обновить в config.json
+   nano /opt/security-monitor/config.json
+
+   # Перезапустить сервис
+   systemctl restart security-monitor
+   ```
 
 ## Файлы проекта
 

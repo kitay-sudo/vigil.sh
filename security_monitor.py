@@ -244,12 +244,13 @@ class TelegramNotifier:
 
 
 class HTTPAPIServer:
-    """HTTP API Server for statistics and health checks"""
+    """HTTP API Server for statistics and health checks with API key authentication"""
 
-    def __init__(self, monitor_ref, host: str = "0.0.0.0", port: int = 8765):
+    def __init__(self, monitor_ref, host: str = "0.0.0.0", port: int = 8765, api_key: str = ""):
         self.monitor = monitor_ref
         self.host = host
         self.port = port
+        self.api_key = api_key
         self.app = Flask(__name__)
         self.start_time = datetime.now()
 
@@ -258,10 +259,34 @@ class HTTPAPIServer:
         flask_log = flask_logging.getLogger('werkzeug')
         flask_log.setLevel(flask_logging.ERROR)
 
-        # Register routes
-        self.app.route('/health')(self.health)
-        self.app.route('/stats')(self.stats)
-        self.app.route('/status')(self.status)
+        # Register routes with /watchdog prefix
+        self.app.route('/watchdog/health')(self.health)
+        self.app.route('/watchdog/stats')(self.stats)
+        self.app.route('/watchdog/status')(self.status)
+
+    def _check_auth(self) -> bool:
+        """Check API key authentication"""
+        from flask import request
+
+        # Get API key from header
+        provided_key = request.headers.get('X-API-Key', '')
+
+        # Check if key matches
+        if provided_key != self.api_key or not self.api_key:
+            # Log unauthorized attempt
+            client_ip = request.remote_addr
+            endpoint = request.path
+            self.monitor.logger.warning(f"Unauthorized API access attempt from {client_ip} to {endpoint}")
+            return False
+
+        return True
+
+    def _unauthorized_response(self):
+        """Return 401 Unauthorized response"""
+        return jsonify({
+            "error": "Unauthorized",
+            "message": "Valid X-API-Key header required"
+        }), 401
 
     def get_uptime_seconds(self) -> int:
         """Get uptime in seconds"""
@@ -288,6 +313,9 @@ class HTTPAPIServer:
 
     def health(self):
         """Health check endpoint"""
+        if not self._check_auth():
+            return self._unauthorized_response()
+
         return jsonify({
             "status": "ok",
             "uptime_seconds": self.get_uptime_seconds(),
@@ -297,6 +325,9 @@ class HTTPAPIServer:
 
     def stats(self):
         """Statistics endpoint"""
+        if not self._check_auth():
+            return self._unauthorized_response()
+
         # Get top countries (limit to 10)
         top_countries = []
         if hasattr(self.monitor, 'daily_stats') and 'by_country' in self.monitor.daily_stats:
@@ -324,6 +355,9 @@ class HTTPAPIServer:
 
     def status(self):
         """Full status endpoint"""
+        if not self._check_auth():
+            return self._unauthorized_response()
+
         return jsonify({
             "server_name": self.monitor.server_name,
             "server_ip": self.monitor.server_ip,
@@ -528,8 +562,13 @@ class SecurityMonitor:
         if self.api_enabled:
             api_host = api_config.get("host", "0.0.0.0")
             api_port = api_config.get("port", 8765)
-            self.api_server = HTTPAPIServer(self, api_host, api_port)
-            self.logger.info(f"HTTP API: ENABLED (http://{api_host}:{api_port})")
+            api_key = api_config.get("api_key", "")
+            self.api_server = HTTPAPIServer(self, api_host, api_port, api_key)
+            self.logger.info(f"HTTP API: ENABLED (http://{api_host}:{api_port}/watchdog/*)")
+            if api_key:
+                self.logger.info("HTTP API: Authentication ENABLED (X-API-Key required)")
+            else:
+                self.logger.warning("HTTP API: Authentication DISABLED (no API key set!)")
 
     def _get_server_ip(self) -> str:
         """Get server's public IP address"""

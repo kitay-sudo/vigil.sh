@@ -1,15 +1,23 @@
 # Security Monitor - Список изменений
 
-## v2.2 - HTTP API для статистики и мониторинга
+## v2.2 - HTTP API с авторизацией (SECURE)
 
-### 🚀 HTTP API Endpoints
+### 🔐 Безопасный HTTP API
 
-Добавлен HTTP API сервер для получения статистики в формате JSON:
+Добавлен защищённый HTTP API сервер для получения статистики в формате JSON.
+
+**🛡️ Безопасность:**
+- **API ключ авторизация** - обязательный header `X-API-Key`
+- **32-символьный ключ** - генерируется автоматически при установке (openssl rand -hex 16)
+- **401 Unauthorized** - без валидного ключа доступ запрещён
+- **Логирование попыток** - все неудачные попытки доступа записываются в лог
+- **Read-only API** - только чтение данных, изменение конфига невозможно
+- **Уникальные пути** - `/watchdog/*` вместо стандартных `/api/*`
 
 **Endpoints:**
-- `GET /health` - healthcheck (uptime, статус)
-- `GET /stats` - статистика (блокировки, угрозы, топ стран)
-- `GET /status` - полный статус (конфиг, защита, whitelist)
+- `GET /watchdog/health` - healthcheck (uptime, статус)
+- `GET /watchdog/stats` - статистика (блокировки, угрозы, топ стран)
+- `GET /watchdog/status` - полный статус (конфиг, защита, whitelist)
 
 **Настройка:**
 ```json
@@ -17,28 +25,37 @@
   "api": {
     "enabled": true,
     "host": "0.0.0.0",
-    "port": 8765
+    "port": 8765,
+    "api_key": "a8f5d9c2b1e4f7a3d6c9e2b5f8a1d4c7"
   }
 }
 ```
 
 **Использование:**
 ```bash
+# Сохранить ключ в переменную
+export API_KEY="a8f5d9c2b1e4f7a3d6c9e2b5f8a1d4c7"
+
 # Healthcheck
-curl http://localhost:8765/health
+curl -H "X-API-Key: $API_KEY" http://localhost:8765/watchdog/health
 
 # Статистика
-curl http://localhost:8765/stats | jq
+curl -H "X-API-Key: $API_KEY" http://localhost:8765/watchdog/stats | jq
 
 # Полный статус
-curl http://localhost:8765/status | jq
+curl -H "X-API-Key: $API_KEY" http://localhost:8765/watchdog/status | jq
+
+# Без ключа - 401 Unauthorized
+curl http://localhost:8765/watchdog/stats
+# {"error": "Unauthorized", "message": "Valid X-API-Key header required"}
 ```
 
 **Интеграция с nginx:**
 Можно проксировать через nginx для доступа по домену:
 ```nginx
-location /api/ {
-    proxy_pass http://localhost:8765/;
+location /watchdog/ {
+    proxy_pass http://localhost:8765/watchdog/;
+    proxy_set_header X-API-Key $http_x_api_key;  # Проброс API ключа
 }
 ```
 

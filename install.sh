@@ -159,7 +159,8 @@ fi
 echo ""
 echo -e "${YELLOW}Configure HTTP API${NC}"
 echo "HTTP API provides JSON endpoints for statistics and monitoring."
-echo "You can access stats via: http://YOUR_SERVER:PORT/stats"
+echo "Access secured with API key (X-API-Key header required)."
+echo "Endpoints: /watchdog/health, /watchdog/stats, /watchdog/status"
 echo ""
 read -p "Enable HTTP API? (y/n, default: y): " ENABLE_API
 ENABLE_API=${ENABLE_API:-"y"}
@@ -168,11 +169,22 @@ if [[ "$ENABLE_API" =~ ^[Yy]$ ]]; then
     API_ENABLED="true"
     read -p "API Port (default: 8765): " API_PORT
     API_PORT=${API_PORT:-8765}
-    echo "HTTP API: ENABLED on port $API_PORT"
-    echo "Endpoints: /health, /stats, /status"
+
+    # Generate secure random API key (32 characters)
+    API_KEY=$(openssl rand -hex 16)
+
+    echo ""
+    echo -e "${GREEN}HTTP API: ENABLED on port $API_PORT${NC}"
+    echo -e "${GREEN}API Key generated: ${YELLOW}$API_KEY${NC}"
+    echo ""
+    echo -e "${YELLOW}IMPORTANT: Save this API key!${NC}"
+    echo "Usage: curl -H \"X-API-Key: $API_KEY\" http://localhost:$API_PORT/watchdog/stats"
+    echo ""
+    read -p "Press Enter to continue..."
 else
     API_ENABLED="false"
     API_PORT="8765"
+    API_KEY=""
     echo "HTTP API: DISABLED"
 fi
 
@@ -210,7 +222,8 @@ cat > $INSTALL_DIR/config.json << EOF
   "api": {
     "enabled": $API_ENABLED,
     "host": "0.0.0.0",
-    "port": $API_PORT
+    "port": $API_PORT,
+    "api_key": "$API_KEY"
   }
 }
 EOF
