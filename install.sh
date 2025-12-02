@@ -48,6 +48,14 @@ if ! pip3 install --break-system-packages -r $INSTALL_DIR/requirements.txt 2>/de
     pip3 install -r $INSTALL_DIR/requirements.txt
 fi
 
+# Configure server name
+echo ""
+echo -e "${YELLOW}Configure Server Name${NC}"
+echo "Enter a friendly name for this server (for notifications):"
+echo "Example: Production API, Web Server 1, Database Master"
+read -p "Server Name: " SERVER_NAME
+SERVER_NAME=${SERVER_NAME:-$(hostname)}
+
 # Configure whitelist
 echo ""
 echo -e "${YELLOW}Configure SSH Whitelist (Admin IPs)${NC}"
@@ -112,6 +120,7 @@ CHAT_ID=${CHAT_ID:-"YOUR_CHAT_ID_HERE"}
 echo -e "${YELLOW}Creating configuration...${NC}"
 cat > $INSTALL_DIR/config.json << EOF
 {
+  "server_name": "$SERVER_NAME",
   "ssh_whitelist": [$SSH_WHITELIST_JSON],
   "service_whitelist": [$SERVICE_WHITELIST_JSON],
   "telegram": {

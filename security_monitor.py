@@ -215,10 +215,10 @@ class TelegramNotifier:
             abuse_emoji = "🟢" if threat.abuse_score < 25 else "🟡" if threat.abuse_score < 50 else "🔴"
             abuse_line = f"\n<b>AbuseIPDB:</b> {abuse_emoji} {threat.abuse_score}% risk"
 
-        # Server info line
+        # Server info lines (name and IP on separate lines)
         server_info = f"🖥 <b>{self.t('server')}:</b> {self.server_name}"
         if self.server_ip and self.server_ip != "Unknown":
-            server_info += f" (<code>{self.server_ip}</code>)"
+            server_info += f"\n🌐 <b>IP:</b> <code>{self.server_ip}</code>"
 
         message = f"""{emoji} <b>{self.t('security_alert').upper()}</b>
 {server_info}
@@ -366,7 +366,7 @@ class SecurityMonitor:
         rate_limit = self.config.get("rate_limit", {})
 
         # Get server info
-        self.server_name = self.run_command('hostname').strip()
+        self.server_name = self.config.get("server_name", "") or self.run_command('hostname').strip()
         self.server_ip = self._get_server_ip()
 
         # Create TelegramNotifier with server info
@@ -824,10 +824,10 @@ class SecurityMonitor:
         suppressed = self.telegram.get_suppressed_count()
         suppressed_text = f"\n⚠️ Пропущено уведомлений (rate limit): {suppressed}" if suppressed > 0 else ""
 
-        # Server info
-        server_info = f"🖥 {self.server_name}"
+        # Server info (name and IP on separate lines)
+        server_info = f"🖥 <b>{self.t('server')}:</b> {self.server_name}"
         if self.server_ip and self.server_ip != "Unknown":
-            server_info += f" (<code>{self.server_ip}</code>)"
+            server_info += f"\n🌐 <b>IP:</b> <code>{self.server_ip}</code>"
 
         message = f"""📊 <b>DAILY REPORT</b>
 {server_info}
@@ -955,13 +955,13 @@ class SecurityMonitor:
         port_scan_status = f"{block_icon} {self.t('block')}" if self.protection.get('block_port_scan', True) else f"{monitor_icon} {self.t('monitor')}"
         http_status = f"{block_icon} {self.t('block')}" if self.protection.get('block_excessive_http', False) else f"{monitor_icon} {self.t('monitor_only')}"
 
-        server_line = f"{self.t('server')}: {self.server_name}"
+        server_line = f"🖥 <b>{self.t('server')}:</b> {self.server_name}"
         if self.server_ip and self.server_ip != "Unknown":
-            server_line += f" (<code>{self.server_ip}</code>)"
+            server_line += f"\n🌐 <b>IP:</b> <code>{self.server_ip}</code>"
 
         self.telegram.send_message(
             f"🟢 <b>{self.t('started')}</b>\n\n"
-            f"🖥 {server_line}\n"
+            f"{server_line}\n"
             f"{self.t('ssh_whitelist')}: {len(self.ssh_whitelist)} {self.t('ips')}\n"
             f"{self.t('blocked')}: {len(self.blocked_ips)} {self.t('ips')}\n"
             f"{self.t('check_interval')}: {interval}s\n\n"
