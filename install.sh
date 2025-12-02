@@ -41,7 +41,12 @@ cp "$SCRIPT_DIR/requirements.txt" $INSTALL_DIR/
 
 # Install Python dependencies
 echo -e "${YELLOW}Installing Python dependencies...${NC}"
-pip3 install --break-system-packages -r $INSTALL_DIR/requirements.txt
+# Try with --break-system-packages first (for newer pip versions)
+# If it fails, try without it (for older pip versions)
+if ! pip3 install --break-system-packages -r $INSTALL_DIR/requirements.txt 2>/dev/null; then
+    echo -e "${YELLOW}Retrying without --break-system-packages...${NC}"
+    pip3 install -r $INSTALL_DIR/requirements.txt
+fi
 
 # Configure whitelist
 echo ""
@@ -54,8 +59,10 @@ read -p "SSH Whitelist IPs: " SSH_WHITELIST_INPUT
 IFS=',' read -ra SSH_WHITELIST_ARRAY <<< "$SSH_WHITELIST_INPUT"
 SSH_WHITELIST_JSON=""
 for ip in "${SSH_WHITELIST_ARRAY[@]}"; do
-    ip=$(echo "$ip" | tr -d ' ')
-    if [ -n "$ip" ]; then
+    # Remove spaces and non-ASCII characters
+    ip=$(echo "$ip" | tr -d ' ' | LC_ALL=C tr -cd '0-9.')
+    # Validate it's a valid IP format (basic check)
+    if [[ $ip =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
         if [ -n "$SSH_WHITELIST_JSON" ]; then
             SSH_WHITELIST_JSON="$SSH_WHITELIST_JSON,"
         fi
@@ -67,15 +74,17 @@ done
 echo ""
 echo -e "${YELLOW}Configure Service Whitelist (Internal services)${NC}"
 echo "Enter IPs for internal services like MongoDB, Redis (comma-separated):"
-echo "Example: 89.223.64.38 (your MongoDB)"
-read -p "Service Whitelist IPs (or press Enter for default): " SERVICE_WHITELIST_INPUT
+echo "Example: 89.223.64.38,10.0.0.5,192.168.1.100"
+read -p "Service Whitelist IPs (or press Enter for default 127.0.0.1): " SERVICE_WHITELIST_INPUT
 
 SERVICE_WHITELIST_JSON="\"127.0.0.1\""
 if [ -n "$SERVICE_WHITELIST_INPUT" ]; then
     IFS=',' read -ra SERVICE_WHITELIST_ARRAY <<< "$SERVICE_WHITELIST_INPUT"
     for ip in "${SERVICE_WHITELIST_ARRAY[@]}"; do
-        ip=$(echo "$ip" | tr -d ' ')
-        if [ -n "$ip" ]; then
+        # Remove spaces and non-ASCII characters
+        ip=$(echo "$ip" | tr -d ' ' | LC_ALL=C tr -cd '0-9.')
+        # Validate it's a valid IP format (basic check)
+        if [[ $ip =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
             SERVICE_WHITELIST_JSON="$SERVICE_WHITELIST_JSON,\"$ip\""
         fi
     done
