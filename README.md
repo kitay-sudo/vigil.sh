@@ -774,15 +774,9 @@ curl -H "X-API-Key: YOUR_API_KEY" http://localhost:8765/watchdog/stats | jq
 curl -H "X-API-Key: YOUR_API_KEY" http://localhost:8765/watchdog/status | jq
 ```
 
-### Интеграция с nginx (опционально)
+### Интеграция с nginx
 
-**nginx НЕ обязателен!** API работает напрямую: `http://SERVER_IP:8765/watchdog/stats`
-
-Но с nginx удобнее - доступ через домен с HTTPS.
-
-#### Вариант 1: Добавить в существующий домен (РЕКОМЕНДУЕТСЯ)
-
-Если у вас уже есть сайт на nginx, просто добавьте одну секцию:
+Добавьте `/watchdog/` к вашему существующему домену. Просто добавьте одну секцию в конфиг nginx:
 
 ```nginx
 server {
@@ -822,54 +816,6 @@ curl https://example.com/
 - ✅ Порт 8765 не открыт наружу (безопасно)
 - ✅ API ключ передаётся по HTTPS (зашифровано)
 - ✅ Один домен для сайта и API
-
-#### Вариант 2: Отдельный поддомен
-
-```nginx
-server {
-    listen 443 ssl;
-    server_name monitor.example.com;
-
-    ssl_certificate /etc/letsencrypt/live/monitor.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/monitor.example.com/privkey.pem;
-
-    location /watchdog/ {
-        proxy_pass http://127.0.0.1:8765/watchdog/;
-        proxy_set_header X-API-Key $http_x_api_key;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-```
-
-**Использование:**
-```bash
-curl -H "X-API-Key: YOUR_KEY" https://monitor.example.com/watchdog/stats
-```
-
-#### Вариант 3: БЕЗ nginx (прямой доступ)
-
-В `config.json`:
-```json
-{
-  "api": {
-    "host": "0.0.0.0",  // Все интерфейсы
-    "port": 8765
-  }
-}
-```
-
-Откройте порт:
-```bash
-ufw allow 8765/tcp
-```
-
-**Использование:**
-```bash
-curl -H "X-API-Key: YOUR_KEY" http://YOUR_SERVER_IP:8765/watchdog/stats
-```
-
-**⚠️ Внимание:** API ключ передаётся по HTTP (не зашифровано). Рекомендуется nginx с HTTPS.
 
 ### Примеры использования API
 
