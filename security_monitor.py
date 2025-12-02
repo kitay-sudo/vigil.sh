@@ -36,6 +36,13 @@ except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
     import requests
 
+try:
+    from flask import Flask, jsonify
+except ImportError:
+    print("Installing flask library...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "flask"])
+    from flask import Flask, jsonify
+
 
 @dataclass
 class ThreatInfo:
@@ -236,6 +243,127 @@ class TelegramNotifier:
         return self.send_message(message)
 
 
+class HTTPAPIServer:
+    """HTTP API Server for statistics and health checks"""
+
+    def __init__(self, monitor_ref, host: str = "0.0.0.0", port: int = 8765):
+        self.monitor = monitor_ref
+        self.host = host
+        self.port = port
+        self.app = Flask(__name__)
+        self.start_time = datetime.now()
+
+        # Disable Flask logging spam
+        import logging as flask_logging
+        flask_log = flask_logging.getLogger('werkzeug')
+        flask_log.setLevel(flask_logging.ERROR)
+
+        # Register routes
+        self.app.route('/health')(self.health)
+        self.app.route('/stats')(self.stats)
+        self.app.route('/status')(self.status)
+
+    def get_uptime_seconds(self) -> int:
+        """Get uptime in seconds"""
+        return int((datetime.now() - self.start_time).total_seconds())
+
+    def get_uptime_human(self) -> str:
+        """Get human-readable uptime"""
+        seconds = self.get_uptime_seconds()
+        days, remainder = divmod(seconds, 86400)
+        hours, remainder = divmod(remainder, 3600)
+        minutes, seconds = divmod(remainder, 60)
+
+        parts = []
+        if days > 0:
+            parts.append(f"{days}d")
+        if hours > 0:
+            parts.append(f"{hours}h")
+        if minutes > 0:
+            parts.append(f"{minutes}m")
+        if seconds > 0 or not parts:
+            parts.append(f"{seconds}s")
+
+        return " ".join(parts)
+
+    def health(self):
+        """Health check endpoint"""
+        return jsonify({
+            "status": "ok",
+            "uptime_seconds": self.get_uptime_seconds(),
+            "uptime_human": self.get_uptime_human(),
+            "timestamp": datetime.now().isoformat()
+        })
+
+    def stats(self):
+        """Statistics endpoint"""
+        # Get top countries (limit to 10)
+        top_countries = []
+        if hasattr(self.monitor, 'daily_stats') and 'by_country' in self.monitor.daily_stats:
+            sorted_countries = sorted(
+                self.monitor.daily_stats['by_country'].items(),
+                key=lambda x: x[1],
+                reverse=True
+            )[:10]
+            top_countries = [{"country": country, "count": count} for country, count in sorted_countries]
+
+        # Get threats by type
+        threats_by_type = {}
+        if hasattr(self.monitor, 'daily_stats') and 'by_type' in self.monitor.daily_stats:
+            threats_by_type = dict(self.monitor.daily_stats['by_type'])
+
+        return jsonify({
+            "blocked_ips_total": len(self.monitor.blocked_ips),
+            "threats_detected_today": self.monitor.daily_stats.get('threats_detected', 0),
+            "ips_blocked_today": self.monitor.daily_stats.get('ips_blocked', 0),
+            "threats_by_type": threats_by_type,
+            "top_countries": top_countries,
+            "last_reset": self.monitor.daily_stats.get('last_reset', datetime.now().date()).isoformat() if isinstance(self.monitor.daily_stats.get('last_reset'), datetime.date) else str(self.monitor.daily_stats.get('last_reset')),
+            "timestamp": datetime.now().isoformat()
+        })
+
+    def status(self):
+        """Full status endpoint"""
+        return jsonify({
+            "server_name": self.monitor.server_name,
+            "server_ip": self.monitor.server_ip,
+            "status": "running",
+            "uptime_seconds": self.get_uptime_seconds(),
+            "uptime_human": self.get_uptime_human(),
+            "ssh_monitoring": {
+                "enabled": self.monitor.enable_ssh_monitoring,
+                "port": self.monitor.ssh_port
+            },
+            "protection": dict(self.monitor.protection),
+            "whitelist": {
+                "ssh": list(self.monitor.ssh_whitelist),
+                "service": list(self.monitor.service_whitelist)
+            },
+            "statistics": {
+                "blocked_ips_total": len(self.monitor.blocked_ips),
+                "threats_detected_today": self.monitor.daily_stats.get('threats_detected', 0),
+                "ips_blocked_today": self.monitor.daily_stats.get('ips_blocked', 0),
+                "threats_by_type": dict(self.monitor.daily_stats.get('by_type', {})),
+                "last_check": datetime.now().isoformat()
+            },
+            "config": {
+                "check_interval_seconds": self.monitor.config.get('check_interval_seconds', 60),
+                "auto_block": self.monitor.config.get('auto_block', True),
+                "language": self.monitor.language
+            },
+            "integrations": {
+                "telegram": self.monitor.telegram.enabled,
+                "abuseipdb": self.monitor.abuseipdb.enabled,
+                "geoip": True
+            },
+            "timestamp": datetime.now().isoformat()
+        })
+
+    def run(self):
+        """Start the HTTP server"""
+        self.app.run(host=self.host, port=self.port, threaded=True)
+
+
 class SecurityMonitor:
     """Main security monitoring class"""
 
@@ -323,6 +451,10 @@ class SecurityMonitor:
         stream_handler.setFormatter(formatter)
         self.logger.addHandler(stream_handler)
 
+        # SSH configuration
+        self.ssh_port = self.config.get("ssh_port", 22)
+        self.enable_ssh_monitoring = self.config.get("enable_ssh_monitoring", True)
+
         # Separate whitelists for different purposes
         self.ssh_whitelist: Set[str] = set(self.config.get("ssh_whitelist", []))
         self.service_whitelist: Set[str] = set(self.config.get("service_whitelist", []))
@@ -383,9 +515,21 @@ class SecurityMonitor:
 
         self.logger.info("Security Monitor v2.1 initialized")
         self.logger.info(f"Server: {self.server_name} ({self.server_ip})")
+        self.logger.info(f"SSH Monitoring: {'ENABLED' if self.enable_ssh_monitoring else 'DISABLED'} (port {self.ssh_port})")
         self.logger.info(f"SSH Whitelist (admin IPs): {self.ssh_whitelist}")
         self.logger.info(f"Service Whitelist (internal): {self.service_whitelist}")
         self.logger.info(f"AbuseIPDB: {'enabled' if self.abuseipdb.enabled else 'disabled'}")
+
+        # Setup HTTP API Server
+        api_config = self.config.get("api", {})
+        self.api_enabled = api_config.get("enabled", False)
+        self.api_server = None
+
+        if self.api_enabled:
+            api_host = api_config.get("host", "0.0.0.0")
+            api_port = api_config.get("port", 8765)
+            self.api_server = HTTPAPIServer(self, api_host, api_port)
+            self.logger.info(f"HTTP API: ENABLED (http://{api_host}:{api_port})")
 
     def _get_server_ip(self) -> str:
         """Get server's public IP address"""
@@ -486,7 +630,7 @@ class SecurityMonitor:
 
     def get_ssh_connections(self) -> List[Dict]:
         """Get established SSH connections"""
-        output = self.run_command("netstat -tnp 2>/dev/null | grep ':22' | grep ESTABLISHED")
+        output = self.run_command(f"netstat -tnp 2>/dev/null | grep ':{self.ssh_port}' | grep ESTABLISHED")
         connections = []
 
         for line in output.strip().split('\n'):
@@ -555,6 +699,9 @@ class SecurityMonitor:
         This IS blocked - SSH should only be accessed by whitelisted IPs.
         Only reports NEW threats (not already blocked IPs).
         """
+        if not self.enable_ssh_monitoring:
+            return []
+
         if not self.protection.get("block_ssh_bruteforce", True):
             return []
 
@@ -657,6 +804,9 @@ class SecurityMonitor:
         Check for SSH sessions from non-whitelisted IPs.
         This IS blocked - only whitelisted IPs should have SSH access.
         """
+        if not self.enable_ssh_monitoring:
+            return []
+
         if not self.protection.get("block_unknown_ssh", True):
             return []
 
@@ -944,6 +1094,12 @@ class SecurityMonitor:
         daily_report_hour = self.config.get("daily_report_hour", 9)  # 9:00 MSK by default
         self.logger.info(f"Starting monitoring loop (interval: {interval}s)")
 
+        # Start HTTP API Server in separate thread
+        if self.api_enabled and self.api_server:
+            api_thread = threading.Thread(target=self.api_server.run, daemon=True)
+            api_thread.start()
+            self.logger.info("HTTP API server started in background")
+
         # Send startup notification
         block_icon = "🛡"
         monitor_icon = "👁"
@@ -959,9 +1115,14 @@ class SecurityMonitor:
         if self.server_ip and self.server_ip != "Unknown":
             server_line += f"\n🌐 <b>IP:</b> <code>{self.server_ip}</code>"
 
+        # SSH monitoring status
+        ssh_monitoring_emoji = "✅" if self.enable_ssh_monitoring else "⏸"
+        ssh_monitoring_text = f"{ssh_monitoring_emoji} SSH Monitoring: {'ENABLED' if self.enable_ssh_monitoring else 'DISABLED'} (port {self.ssh_port})"
+
         self.telegram.send_message(
             f"🟢 <b>{self.t('started')}</b>\n\n"
             f"{server_line}\n"
+            f"{ssh_monitoring_text}\n"
             f"{self.t('ssh_whitelist')}: {len(self.ssh_whitelist)} {self.t('ips')}\n"
             f"{self.t('blocked')}: {len(self.blocked_ips)} {self.t('ips')}\n"
             f"{self.t('check_interval')}: {interval}s\n\n"
@@ -973,7 +1134,8 @@ class SecurityMonitor:
             f"• {self.t('http_traffic')}: {http_status}\n\n"
             f"<b>{self.t('features')}:</b>\n"
             f"• ✅ GeoIP\n"
-            f"• ✅ Rate Limit",
+            f"• ✅ Rate Limit\n"
+            f"• {'✅' if self.api_enabled else '❌'} HTTP API{f' (:{self.config.get(\"api\", {}).get(\"port\", 8765)})' if self.api_enabled else ''}",
             "HTML",
             force=True
         )
@@ -1082,6 +1244,8 @@ def main():
 
     if args.show_status:
         print(f"Security Monitor v2.1")
+        print(f"Server: {monitor.server_name} ({monitor.server_ip})")
+        print(f"SSH Monitoring: {'✅ ENABLED' if monitor.enable_ssh_monitoring else '⏸ DISABLED'} (port {monitor.ssh_port})")
         print(f"SSH Whitelist (admin IPs): {monitor.ssh_whitelist}")
         print(f"Service Whitelist (internal): {monitor.service_whitelist}")
         print(f"Blocked IPs: {len(monitor.blocked_ips)}")

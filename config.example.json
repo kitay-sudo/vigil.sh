@@ -1,5 +1,7 @@
 {
   "language": "ru",
+  "ssh_port": 22,
+  "enable_ssh_monitoring": true,
   "ssh_whitelist": [
     "YOUR_IP_HERE"
   ],
@@ -27,5 +29,10 @@
   "check_interval_seconds": 60,
   "auto_block": true,
   "log_file": "/var/log/security-monitor.log",
-  "blocked_ips_file": "/var/log/blocked-ips.log"
+  "blocked_ips_file": "/var/log/blocked-ips.log",
+  "api": {
+    "enabled": true,
+    "host": "0.0.0.0",
+    "port": 8765
+  }
 }

@@ -116,11 +116,73 @@ read -p "Telegram Chat ID (or press Enter to skip): " CHAT_ID
 BOT_TOKEN=${BOT_TOKEN:-"YOUR_BOT_TOKEN_HERE"}
 CHAT_ID=${CHAT_ID:-"YOUR_CHAT_ID_HERE"}
 
+# Configure SSH Monitoring
+echo ""
+echo -e "${YELLOW}Configure SSH Monitoring${NC}"
+echo "Do you want to enable SSH monitoring and brute-force protection?"
+echo "Note: If you use SSH keys only and disabled password auth, you may not need this."
+echo ""
+read -p "Enable SSH monitoring? (y/n, default: y): " ENABLE_SSH_MONITORING
+ENABLE_SSH_MONITORING=${ENABLE_SSH_MONITORING:-"y"}
+
+if [[ "$ENABLE_SSH_MONITORING" =~ ^[Yy]$ ]]; then
+    SSH_MONITORING_ENABLED="true"
+
+    # Auto-detect SSH port
+    echo ""
+    echo -e "${YELLOW}Detecting SSH port...${NC}"
+    DETECTED_SSH_PORT=$(ss -tlnp 2>/dev/null | grep sshd | grep -oP ':\K[0-9]+' | head -1)
+    if [ -z "$DETECTED_SSH_PORT" ]; then
+        # Fallback to netstat
+        DETECTED_SSH_PORT=$(netstat -tlnp 2>/dev/null | grep sshd | grep -oP ':\K[0-9]+' | head -1)
+    fi
+
+    if [ -n "$DETECTED_SSH_PORT" ]; then
+        echo "Detected SSH port: $DETECTED_SSH_PORT"
+        read -p "Use this port? (press Enter to confirm or type different port): " SSH_PORT_INPUT
+        SSH_PORT=${SSH_PORT_INPUT:-$DETECTED_SSH_PORT}
+    else
+        echo "Could not auto-detect SSH port."
+        read -p "Enter SSH port (default: 22): " SSH_PORT
+        SSH_PORT=${SSH_PORT:-22}
+    fi
+
+    echo "SSH monitoring: ENABLED on port $SSH_PORT"
+else
+    SSH_MONITORING_ENABLED="false"
+    SSH_PORT="22"
+    echo "SSH monitoring: DISABLED"
+    echo "Only SYN flood and DDoS protection will be active."
+fi
+
+# Configure HTTP API
+echo ""
+echo -e "${YELLOW}Configure HTTP API${NC}"
+echo "HTTP API provides JSON endpoints for statistics and monitoring."
+echo "You can access stats via: http://YOUR_SERVER:PORT/stats"
+echo ""
+read -p "Enable HTTP API? (y/n, default: y): " ENABLE_API
+ENABLE_API=${ENABLE_API:-"y"}
+
+if [[ "$ENABLE_API" =~ ^[Yy]$ ]]; then
+    API_ENABLED="true"
+    read -p "API Port (default: 8765): " API_PORT
+    API_PORT=${API_PORT:-8765}
+    echo "HTTP API: ENABLED on port $API_PORT"
+    echo "Endpoints: /health, /stats, /status"
+else
+    API_ENABLED="false"
+    API_PORT="8765"
+    echo "HTTP API: DISABLED"
+fi
+
 # Create config file
 echo -e "${YELLOW}Creating configuration...${NC}"
 cat > $INSTALL_DIR/config.json << EOF
 {
   "server_name": "$SERVER_NAME",
+  "ssh_port": $SSH_PORT,
+  "enable_ssh_monitoring": $SSH_MONITORING_ENABLED,
   "ssh_whitelist": [$SSH_WHITELIST_JSON],
   "service_whitelist": [$SERVICE_WHITELIST_JSON],
   "telegram": {
@@ -135,8 +197,8 @@ cat > $INSTALL_DIR/config.json << EOF
     "ssh_connections_per_ip_max": 3
   },
   "protection": {
-    "block_ssh_bruteforce": true,
-    "block_unknown_ssh": true,
+    "block_ssh_bruteforce": $SSH_MONITORING_ENABLED,
+    "block_unknown_ssh": $SSH_MONITORING_ENABLED,
     "block_syn_flood": true,
     "block_excessive_http": false,
     "notify_excessive_http": true
@@ -144,7 +206,12 @@ cat > $INSTALL_DIR/config.json << EOF
   "check_interval_seconds": 60,
   "auto_block": true,
   "log_file": "/var/log/security-monitor.log",
-  "blocked_ips_file": "/var/log/blocked-ips.log"
+  "blocked_ips_file": "/var/log/blocked-ips.log",
+  "api": {
+    "enabled": $API_ENABLED,
+    "host": "0.0.0.0",
+    "port": $API_PORT
+  }
 }
 EOF
 
